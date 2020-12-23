@@ -1,0 +1,379 @@
+---
+title: "Predict the 2019 Canadian election by busing MRP and Post-stratification method"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+    
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+## Abstract
+  
+&emsp;&emsp;Due to the cost of time and money, it is often impossible to obtain all samples during surveys. In this case，sample surveys will be a better way.If the samples are representative enough, the actual results will be accurately predicted.However, if the sampled data is not representative, whether it can accurately predict the true result is a question which needs to be considered. In this study, two data sets are selected for prediction experiments. We first build a multi-regression model on the collected data set of the 2019 Canadian Election Research (CES) telephone survey data set to understand how different age groups, different genders, different education levels and different regions affect interviewers' political intentions for the election. Since the data set is far from covering all the people, thus，we need the 2016 Education Census to modify the predictive model by establishing a post-hierarchical model. After adjusting the response of the 2019 telephone survey data set through multi-regression and post-layering, results which seem to be more representative are obtained. 
+ 
+## Introduction
+  
+&emsp;&emsp;In this project, using the data from CES by using MRP and post-stratification method to predict the 2019 Canadian us election. Since Canadian election is one the biggest event that people pay a lot of attention.
+
+&emsp;&emsp;People would vote for different government based on the policies which benefits their life in many ways like social welfare, public health etc.
+
+&emsp;&emsp;In this project MRP is a good method for data analysis, data can be found in Canadian Election Survey (CES) There are two predictors should be considered: demographic data and area information. Post-Stratification method need to use the census data to do the analysis, Canadian 2016 Education census is a good data set for this data analysis.
+
+## Data
+  
+&emsp;&emsp;Two data sets are used in this experiment.
+
+&emsp;&emsp;The first one is the 2019 Canadian Election Study (CES) phone survey data set searched in the 2019 Canadian federal election survey. The CES survey data sets are publicly available from various repositories across the internet in various data types (Canadian Election Study, 2019; UBC, 2015; ODESI, 2020). This data set includes 4021 samples with 278 variables. These variables include basic information such as the voter's gender, age, education, and province.It also includes some questions about the election such as “Is there a party you are leaning towards”. Despite the large sample size, the 4021 samples are far from being representative of the voting population. 
+
+&emsp;&emsp;In the data set, the proportion of male is 66.3% and the proportion of female is 31%. In terms of age range, 44.3% of the respondents were over 55 years old, 18.1% were 45-54 years old, 17.3% were 35-44 years old, and 14% were 25-34 years old During the period, only 6.4% of the respondents were aged 18-24. This gender and age range distribution is different from the population distribution of ordinary Canadian voters. Therefore, another data set needs to be used for correction to obtain voting results that can predict "everyone". 
+
+&emsp;&emsp;The other one we use here is Canadian 2016 Education census data set. This data set contains a survey of the gender, age, education and province in the 2016 census.
+
+&emsp;&emsp;Since the census data we use here is from 2016,so we make an assumption that the demographic situation of 2016 is similar to that of 2019.
+  
+## Method
+  
+&emsp;&emsp;In order to convert the data of the 2019 Canadian federal election into an accurate estimate of
+"everyone’s" voting intention, the rich population information of Canada's 2016 Education Census is used. 
+&emsp;&emsp;Post-stratification is a popular method to correct the known differences between the sample and the target population. The core idea is to partition the population into the cell population and educational attributes according to various combinations, use the sample to estimate the response variable in each cell, and finally aggregate the unit estimates the proportion of the relative population of each cell to the national estimated weight. Use y to represent the result of interest, and the estimation after stratification is defined as:
+$$\hat{\mathrm{y}}=\frac{\sum_{j=1}^{J} N_{j} \hat{y}_{j}}{\sum_{j=1}^{J} N_{j}}$$where$$ \hat{y}_{j} $$is the estimate of y in cell j, and$$N_{j}$$is the size of the jth cell in the population. Analogously, we can derive an estimate of y at any sub-population level s by$$\hat{\mathrm{y}}=\frac{\sum_{j=1}^{J} N_{j} \hat{y}_{j}}{\sum_{j=1}^{J} N_{j}}$$where$$J_{S}$$is the set of all cells that comprise s. As is readily apparent from the form of the post-stratification estimator, the key is to obtain accurate cell-level estimates and estimates of the cell sizes.
+  
+## Model
+&emsp;&emsp;When given a person with demographic information and the region he belongs to,the model we build here is used to estimate whether he will vote for the liberal party.
+&emsp;&emsp;Before we build the model,we need to do some data pre-processing to make the variables in the two data sets match each other.
+&emsp;&emsp;First of all,we load the packages needed.
+```{r}
+library(Hmisc)
+library(data.table)
+library(lme4)
+library(cesR)
+library(dplyr)
+library(tidyverse)
+library(arm)
+library(magrittr)
+library(ggplot2)
+```
+&emsp;&emsp;Then,we deal with the CES data set.We load the data and select variables we need and only keep the 'Liberal Party' and set other parties as 'others'.
+
+```{r}
+df <- data.table(spss.get("CES-E-2019-phone_F1.sav", use.value.labels=TRUE))
+df <- df %>% rename(gender = q3,province_territory = q4, past_vote = q60, 
+                    education=q61,party_preference = q33, now_vote = p3)
+
+col_1 <- c('gender','now_vote','education','age.range','province_territory')
+mydf1 <- df[,c('gender','now_vote','education','age.range','province_territory')]
+mydf1 <- na.omit(mydf1)
+
+
+mydf1$vote <- 'Na' 
+mydf1[mydf1$now_vote == '(1) Liberal Party',]$vote = 'Liberal Party'
+mydf1[mydf1$now_vote != '(1) Liberal Party' & mydf1$now_vote != "Don't know" & mydf1$now_vote != "Refused",]$vote = 'Others'   
+
+mydf2 <- na.omit(mydf1)   #delete missing variables
+mydf2 <- mydf2[,-2]
+
+mydf2$gender <- as.factor(mydf2$gender)  #change the data types to fit the model's demand
+mydf2$education <- as.factor(mydf2$education)
+mydf2$vote <- as.factor(mydf2$vote)
+mydf2$age.range <- as.factor(mydf2$age.range)
+mydf2$province_territory <- as.factor(mydf2$province_territory)
+```
+
+```{r}
+mydf2$vote.of.Liberal <- 0
+mydf2[mydf2$vote == 'Liberal Party',]$vote.of.Liberal <- 1
+
+mydf2$vote.of.Others <- 0
+mydf2[mydf2$vote == 'Others',]$vote.of.Others <- 1
+```
+&emsp;&emsp;In order to match the four corresponding variables in the two data sets, we deal with the four variables respectively.In the gender variable, only respondents whose gender options are male or female are considered. In terms of age, there is no option of 18-24 years old in 2016 census data set, so we use "15 years and over" minus "25 to 64" to get the specified group. As for the education variable, delete the options of "Don’t know","Refused"and"Skipped".And we map the education variables one to one in the two data sets.Lastly, Only keep options with data in terms of province or territory.
+  
+```{r}
+edu_df <- read.csv('bbb.csv')  #read the census data
+#head(edu_df)
+```
+
+```{r}
+df_pivot <- edu_df[,c(2,5,6,8:13)] %>% pivot_longer(cols=4:9,
+names_to='education',values_to="total_count")   #do a pivot
+
+
+#delete the variables which are unnecessary
+temp<-filter(df_pivot, Sex != "Both sexes")
+temp<-filter(temp, Geographic.name != "Canada")
+
+
+```
+
+```{r}
+age.index <- which(temp$Age == 'All ages, 15-plus')
+for (i in age.index){
+  temp[i,5] <- temp[i,5] - temp[i+12,5]
+}
+
+temp<-filter(temp,Age != '25 to 64')
+temp[which(temp$Age == 'All ages, 15-plus'),2] <- '15 to 24'  
+#get 15 to 24 age group through the other two groups
+
+```
+
+```{r}
+#then we rename each age group
+
+#15-24 -> 1
+#24-34 -> 2
+#35-44 -> 3
+#45-54 -> 4
+#54-64  -> 5
+
+
+temp[which(temp$Age == '15 to 24'),2] <- '1'
+temp[which(temp$Age == '25 to 34'),2] <- '2'
+temp[which(temp$Age == '35 to 44'),2] <- '3'
+temp[which(temp$Age == '45 to 54'),2] <- '4'
+temp[which(temp$Age == '55 to 64'),2] <- '5'
+
+#table(temp$Age)
+```
+
+```{r}
+
+#deal with the sex group
+
+temp[which(temp$Sex == 'Male'),3] <- '1'
+temp[which(temp$Sex == 'Female'),3] <- '2'
+
+#table(temp$Sex)
+```
+  
+
+```{r}
+education_name <- names(table(temp$education))
+
+#University certificate, diploma or degree at bachelor level or above (2016 counts) ->5
+#University certificate or diploma below bachelor level (2016 counts) -> 4   
+#College, CEGEP or other non-university certificate or diploma (2016 counts) -> 3  
+#Secondary (high) school diploma or equivalency certificate (2016 counts) ->2   
+#No certificate, diploma or degree (2016 counts) -> 1  
+
+temp[which(temp$education == education_name[3]),4] <- '1'
+temp[which(temp$education == education_name[4]),4] <- '2'
+temp[which(temp$education == education_name[2]),4] <- '3'
+temp[which(temp$education == education_name[6]),4] <- '4'
+temp[which(temp$education == education_name[5]),4] <- '5'
+
+temp<-filter(temp,education != education_name[1])
+
+#table(temp$education)
+
+```
+
+  
+```{r}
+geo_names <- names(table(temp$Geographic.name))
+temp1 <- temp  #for safety,construct a new data-frame 
+
+non <- c('Northwest Territories','Yukon','Nunavut')   
+#the territory or province without recorded data in CES
+
+geo_names <- geo_names[c(-6,-13,-8)] 
+#we delete the territory or province without recorded data in CES
+
+temp1 <- filter(temp1,Geographic.name %in% geo_names)
+
+for(i in 1:10){
+  temp1[which(temp1$Geographic.name==geo_names[i]),1] <- as.factor(i)
+}
+```
+
+```{r}
+edu.df <- temp1
+#edu.df
+```
+```{r}
+##then,we deal with the CES data set
+ces.df <- mydf2 %>%
+  dplyr::rename(Sex=gender, Age=age.range, Geographic.name = province_territory)
+
+
+temp2 <- ces.df
+
+sex_name <- names(table(ces.df$Sex))
+
+temp2[which(temp2$Sex == sex_name[4]),1] <- '1'
+temp2[which(temp2$Sex == sex_name[5]),1] <- '2'
+
+
+#table(temp2$Sex)
+
+temp2 <- filter(temp2,Sex == '1' | Sex == '2' )  #we only keep answers which are 'female' or 'male' 
+```
+
+  
+```{r}
+age.names <- names(table(temp2$Age))
+
+temp2[which(temp2$Age == age.names[4]),3] <- '1'
+temp2[which(temp2$Age == age.names[5]),3] <- '2'
+temp2[which(temp2$Age == age.names[6]),3] <- '3'
+temp2[which(temp2$Age == age.names[7]),3] <- '4'
+temp2[which(temp2$Age == age.names[8]),3] <- '5'
+
+#table(temp2$Age)
+```
+
+
+
+```{r}
+for(i in 1:10){
+  temp2[which(grepl(geo_names[i], Geographic.name, fixed = TRUE)),4] <- as.factor(i)
+}
+#table(temp2$Geographic.name)
+```
+
+
+```{r}
+edu.names <- names(table(temp2$education))
+
+temp2[which(temp2$education == edu.names[4]),2] <- '1'
+temp2[which(temp2$education %in% c(edu.names[7],edu.names[8])),2] <- '2'
+temp2[which(temp2$education %in% c(edu.names[9],edu.names[10])),2] <- '3'
+temp2[which(temp2$education %in% c(edu.names[11],edu.names[12])),2] <- '4'
+temp2[which(temp2$education %in% c(edu.names[13],edu.names[14])),2] <- '5'
+
+temp2 <- filter(temp2,education %in% c('1','2','3','4','5'))
+```
+
+
+```{r}
+
+#finally, we delete unnecessary factors
+
+temp2$Sex <- droplevels(temp2$Sex) 
+temp2$education <- droplevels(temp2$education) 
+temp2$Age <- droplevels(temp2$Age) 
+temp2$Geographic.name <- droplevels(temp2$Geographic.name) 
+```
+
+```{r}
+#head(temp2)
+```
+&emsp;&emsp;Now, we finish data pre-processing.It's time to build the MRP model.Before we build the model,we take a quick look at the support rate of liberal party in the 2019 telephone interviews which is grouped  by province or territory.
+```{r}
+vote.opinion <- mydf2 %>%
+  group_by(province_territory) %>%
+  summarise(support = mean(vote.of.Liberal))
+vote.opinion[order(vote.opinion$province_territory),]
+
+vote.opinion  %>%
+  ggplot(aes(x=support, y=reorder(province_territory, support))) +
+  geom_point() + 
+  geom_vline(xintercept = mean(vote.opinion$support), linetype=2)
+```
+&emsp;&emsp;First of all,we build the multilevel model which is given by:
+  $$\begin{array}{l}
+\operatorname{Pr}\left(Y_{i}=\text {liberal party}\right) \\
+=\quad \text { logit }^{-1}\left(\alpha_{0}+\right. \\
+\left.\quad+a_{j[i]}^{\mathrm{geo}}+a_{j[i]}^{\mathrm{edu}}+a_{j[i]}^{\mathrm{Sex}}+a_{j[i]}^{\mathrm{age}}\right)\end{array}$$
+
+```{r}
+model1 <- glmer(formula = vote.of.Liberal ~ 
+                            (1|Sex) + (1|education) +
+                            (1|Age) + (1|Geographic.name),
+                          data=temp2, family=binomial(link="logit"))
+```
+
+
+```{r}
+display(model1)
+```
+&emsp;&emsp;Analyze these coefficients, and then analyze each specific coefficient. The following table shows the weight coefficients of different age groups to liberal political parties. The 1-5 in the table indicate different age range groups.1 represents 15-24, 2 represents 25-24, 3 represents 35-44, 4 represents 45-54 and 5 means 55 and older.It can be concluded that the larger the age range of respondents, the higher chance he will support rate for liberal.
+  
+```{r}
+ranef(model1)$Age
+```
+&emsp;&emsp;In terms of gender, observing the table below shows that the weight coefficient of women is positive, while that of men is negative(1 means male, 2 means female). Therefore, it can be concluded that women are more inclined to vote liberal.
+    
+    
+```{r}
+ranef(model1)$Sex
+```
+&emsp;&emsp;Below are the weight coefficients shown by respondents with different education levels for the approval rate of liberal. Among them, 4 are college degrees and below and 5 are college degrees and above. We can conclude from the table that people with high education are more inclined to vote for liberal.
+```{r}
+ranef(model1)$education
+```
+&emsp;&emsp;Finally, on the CES data set, the weighted results of respondents' support for liberal parties in different regions, 1-10 correspond to the regions on the right.
+```{r}
+inter_geo <- ranef(model1)$Geographic.name 
+inter_geo$geographic <- 'Na'
+
+for(i in 1:10){
+  inter_geo$geographic[i] <- geo_names[i]
+}
+
+inter_geo
+```
+&emsp;&emsp;The next analysis is based on the 2016 education census data set, and the weights should be adjusted on this data set. We need to weigh the regression effects by the relative population as shown in the census.
+&emsp;&emsp;The first thing is to calculate 'cpercent', which is the frequency of each region's voting rate divided by the total number of people.Then, we get the support rate of different regions after revision.
+&emsp;&emsp;Since each post-stratifying cell or category is given as a percentage of the total population of a state by the Census. And our mega-poll is not a random sampling of each state, to get state-level outcomes in the proper ratios we need to weigh each cell by their percent of the province or territory population. After that, create a vector for each cell, the specific operations are shown in the table below.
+
+```{r}
+cellpre <- invlogit(fixef(model1)["(Intercept)"] 
+                     + ranef(model1)$Age[edu.df$Age,1]
+                     + ranef(model1)$Sex[edu.df$Sex,1] 
+                     + ranef(model1)$education[edu.df$education,1]
+                     + ranef(model1)$Geographic.name[edu.df$Geographic.name,1]
+                     )
+
+```
+&emsp;&emsp;For the predicted value of each cell, scale it by uses the cpercent mentioned above.
+  
+```{r}
+total <- sum(edu.df$total_count)
+edu.df$cpercent <- edu.df$total_count / total
+cellpreweighted <- cellpre * edu.df$cpercent
+```
+&emsp;&emsp;Finally，we get the table which if  the support rate of different regions after revision.
+  
+```{r pressure, echo=FALSE}
+Geographicpred <- tibble(
+  Geographic.name = unique(edu.df$Geographic.name),
+  pred.support = 100*as.vector(tapply(cellpreweighted,edu.df$Geographic.name,sum))
+)
+
+Geographicpred <- Geographicpred[order(Geographicpred$Geographic.name),] 
+
+Geographicpred$geographic <- 'Na'
+
+for(i in 2:9){
+  Geographicpred[i+1,3] <- geo_names[i]
+}
+
+Geographicpred[1,3] <- geo_names[1]
+Geographicpred[2,3] <- geo_names[10]
+
+Geographicpred
+```
+## Summary:
+&emsp;&emsp;In this study, two data sets were selected for prediction experiments. We first build a multi-regression model on the acquired data set 2019 Canadian Election Study (CES) phone survey data set to understand how different age groups, different genders, different education levels, and different regions affect the interviewer’s political intentions for the election. However, since this data set is not representative, and the sample is not enough to represent the election intentions of the people across the country. Therefore, the 2016 Education Census was used to modify the prediction model through the establishment of a post-stratification model. After adjusting the response of the 2019 telephone survey data set through multi-regression and post-layering, relatively representative results were obtained. Therefore, it can be considered that modifying the data set through the MRP method can enable non-representative polls to not only predict election results, but also measure public opinion in a wide range of social, economic, and political fields.
+
+## Conclusions:
+&emsp;&emsp;Election forecasts must not only be accurate, but also relevant, timely, and cost-effective. In this experiment, we used extremely unrepresentative and small data to construct a prediction that satisfies all these requirements. Although the data is collected on a proprietary public opinion survey platform, in principle people can collect these unrepresentative samples at a fraction of the cost of traditional survey design. In addition, the forecasts generated by these data are both relevant and timely because they can be updated faster and more regularly than standard election polls. Therefore, one of the main goals and main contributions of this article is to assess the extent to which accurate predictions are generated from unrepresentative samples. Due to the limited basic facts of election predictions, it is difficult to accurately determine the accuracy of our predictions. 
+
+## Weakness & Next Steps:
+&emsp;&emsp;The shortcomings are obvious. The census data set we use doesn't contain any suitable variables  that can reflect the political intentions of voters. This point will become far-fetched when analyzing the data, and it is not convincing enough to prove that the data prediction modified by this model can represent the voting willingness of "everyone" across the country.
+
+&emsp;&emsp;Therefore, if there is a chance to make further progress, I will find a more suitable data set to include some political variables.
+
+&emsp;&emsp;Alternatively, the way we use here to deal with missing categories is by simply deleting them. While another way to reconstruct missing categories is by using the variation estimated by the model. Since each individual's intercept within that group is actually pulled from a normal distribution of mean zero and the listed standard deviation. If we would like to know the total uncertainty about our knowledge in Northwest territories, Yukon and Nunavut, we actually want to sample that distribution and show the overall changes.
+
+## References:
+[1]Wang W, Rothschild D, Goel S, et al. Forecasting elections with non-representative polls[J]. International Journal of Forecasting, 2015, 31(3): 980-991.
+[2]Stephenson, L., Harell, A., Rubenson, D., &amp; Loewen, P. (2020, May 01). 2019 Canadian Election Study - Online Survey. Retrieved December 10, 2020, from https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910%2FDVN%2FDUS88V
+[3]Government of Canada, S. (2017, November 27). Education Highlight Tables, 2016 Census. Retrieved December 10, 2020, from https://www12.statcan.gc.ca/census-recensement/2016/dp- pd/hlt-fst/edu-sco/index-eng.cfm
+
